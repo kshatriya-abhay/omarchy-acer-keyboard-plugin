@@ -113,19 +113,12 @@ Panel {
   }
 
   // ---- color field sync ---------------------------------------------------
-  // Channels -> hex is live. Hex -> channels happens on commit (editing
-  // finished), so typing a partial hex value never fights the fields.
-  function syncHex() {
-    hexField.text = root.hexValue
-  }
-
-  function syncColorFields() {
-    redNum.field.value = root.red
-    greenNum.field.value = root.green
-    blueNum.field.value = root.blue
-    root.syncHex()
-  }
-
+  // Channels -> hex is live: the hex field's text is bound to hexValue
+  // (self-guarded so an active edit isn't clobbered). Hex -> channels happens
+  // on commit (editing finished), so typing a partial hex never fights the
+  // fields. NumberFields are kept live purely by their `value:
+  // root.red|green|blue` bindings — never write spin.value imperatively, that
+  // severs the binding.
   function commitHex(raw) {
     if (!root.available) return
     var rgb = Model.hexToRgb(raw)
@@ -134,7 +127,6 @@ Panel {
       root.green = rgb.g
       root.blue = rgb.b
     }
-    root.syncColorFields()
     commitTimer.stop()
     root.apply()
   }
@@ -349,10 +341,6 @@ Panel {
     }
   }
 
-  onRedChanged: root.syncHex()
-  onGreenChanged: root.syncHex()
-  onBlueChanged: root.syncHex()
-
   Process {
     id: stateProc
     command: [root.helperPath(), "get"]
@@ -370,7 +358,6 @@ Panel {
         root.speed = state.speed
         root.direction = state.direction
         root.clampCursor()
-        root.syncColorFields()
       }
     }
   }
@@ -649,7 +636,7 @@ Panel {
               foreground: root.bar.foreground
               outline: true
 
-              PanelSlider {
+              PanelSliderFixed {
                 id: brightnessSlider
                 bar: root.bar
                 enabled: root.available
@@ -804,7 +791,7 @@ Panel {
               foreground: root.bar.foreground
               outline: true
 
-              PanelSlider {
+              PanelSliderFixed {
                 id: speedSlider
                 bar: root.bar
                 enabled: root.available
@@ -989,7 +976,7 @@ Panel {
                   anchors.verticalCenter: parent.verticalCenter
                 }
 
-                PanelSlider {
+                PanelSliderFixed {
                   id: redSlider
                   bar: root.bar
                   enabled: root.available
@@ -1057,7 +1044,7 @@ Panel {
                   anchors.verticalCenter: parent.verticalCenter
                 }
 
-                PanelSlider {
+                PanelSliderFixed {
                   id: greenSlider
                   bar: root.bar
                   enabled: root.available
@@ -1125,7 +1112,7 @@ Panel {
                   anchors.verticalCenter: parent.verticalCenter
                 }
 
-                PanelSlider {
+                PanelSliderFixed {
                   id: blueSlider
                   bar: root.bar
                   enabled: root.available
@@ -1183,6 +1170,8 @@ Panel {
                 horizontalAlignment: Text.AlignHCenter
                 foreground: root.bar.foreground
                 accent: Color.accent
+                // Live from channels, but never clobber an in-progress edit.
+                text: hexField.activeFocus ? hexField.text : root.hexValue
                 onEditingFinished: root.commitHex(hexField.text)
                 onAccepted: root.commitHex(hexField.text)
                 onHoveredChanged: if (hovered) {
