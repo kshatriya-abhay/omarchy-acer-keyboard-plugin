@@ -1,0 +1,118 @@
+#!/usr/bin/env bash
+# Acer keyboard RGB helper.
+#
+# Writes static color + brightness to the facer kernel module char devices and
+# persists the last applied state. The devices are write-only, so state.json is
+# the source of truth for the UI.
+#
+# The state file must NOT live inside the plugin directory: omarchy-shell runs
+# inotifywait on ~/.config/omarchy/plugins/ and would see every state write as
+# a plugin change, reload the widget, re-apply, and loop forever. It lives
+# under ~/.config/omarchy/ instead (the shell only watches shell.json there,
+# and the plugin watcher only watches the plugins/ subdirectory).
+#
+#   kbd-rgb set <brightness> <r> <g> <b> [<powered> <lastBrightness>]
+#   kbd-rgb inc <percent>    # raise brightness (powers on)
+#   kbd-rgb dec <percent>    # lower brightness (powers off at 0)
+#   kbd-rgb toggle           # backlit RGB on/off (off keeps lastBrightness)
+#   kbd-rgb get
+set -euo pipefail
+
+DYNAMIC_DEV="/dev/acer-gkbbl-0"
+STATIC_DEV="/dev/acer-gkbbl-static-0"
+STATE_DIR="$HOME/.config/omarchy/kshatriya-abhay.acer-keyboard"
+STATE_FILE="$STATE_DIR/state.json"
+
+mkdir -p "$STATE_DIR"
+
+usage() {
+  echo "usage: $(basename "$0") set <brightness> <r> <g> <b> [<powered> <lastBrightness>] | inc <percent> | dec <percent> | toggle | get" >&2
+  exit 2
+}
+
+# Format a single byte from a 0-255 integer as an octal escape. printf parses
+# \NNN as octal, which lets us emit arbitrary bytes without mixing \x and %02x
+# in one format string (bash's printf rejects \x followed by '%').
+oct() { printf '%03o' "$1"; }
+
+write_set() {
+  local brightness="$1" r="$2" g="$3" b="$4"
+  local powered="${5:-1}" last="${6:-$brightness}"
+
+  # Static color: one 4-byte write per zone. Zone bitmask = 1 << (zone - 1).
+  for zone in 1 2 4 8; do
+    printf "\\$(oct "$zone")\\$(oct "$r")\\$(oct "$g")\\$(oct "$b")" > "$STATIC_DEV"
+  done
+
+  # Static mode + brightness: 16-byte payload, byte[2] = brightness, byte[9] = 1.
+  printf "\\$(oct 0)\\$(oct 0)\\$(oct "$brightness")\\$(oct 0)\\$(oct 0)\\$(oct 0)\\$(oct 0)\\$(oct 0)\\$(oct 0)\\$(oct 1)\\$(oct 0)\\$(oct 0)\\$(oct 0)\\$(oct 0)\\$(oct 0)\\$(oct 0)" > "$DYNAMIC_DEV"
+
+  printf '{"brightness":%d,"r":%d,"g":%d,"b":%d,"poweredOn":%s,"lastBrightness":%d}\n' \
+    "$brightness" "$r" "$g" "$b" "$powered" "$last" > "$STATE_FILE"
+}
+
+check_devices() {
+  for dev in "$STATIC_DEV" "$DYNAMIC_DEV"; do
+    [[ -e "$dev" ]] || { echo "device missing: $dev" >&2; exit 1; }
+  done
+}
+
+# Load persisted state into C_* globals (sensible defaults if absent).
+load_state() {
+  local s
+  s=$(cat "$STATE_FILE" 2>/dev/null) || s='{"brightness":100,"r":255,"g":255,"b":255,"poweredOn":true,"lastBrightness":100}'
+  C_BRIGHTNESS=$(sed -n 's/.*"brightness":\([0-9]*\).*/\1/p' <<<"$s")
+  C_R=$(sed -n 's/.*"r":\([0-9]*\).*/\1/p' <<<"$s")
+  C_G=$(sed -n 's/.*"g":\([0-9]*\).*/\1/p' <<<"$s")
+  C_B=$(sed -n 's/.*"b":\([0-9]*\).*/\1/p' <<<"$s")
+  C_POWERED=$(sed -n 's/.*"poweredOn":\([^,}]*\).*/\1/p' <<<"$s")
+  C_LAST=$(sed -n 's/.*"lastBrightness":\([0-9]*\).*/\1/p' <<<"$s")
+  [[ "$C_POWERED" == true ]] && C_POWERED=1
+  [[ "$C_POWERED" == false ]] && C_POWERED=0
+  C_BRIGHTNESS=${C_BRIGHTNESS:-100}; C_R=${C_R:-255}; C_G=${C_G:-255}; C_B=${C_B:-255}
+  C_POWERED=${C_POWERED:-1}; C_LAST=${C_LAST:-100}
+}
+
+case "${1:-}" in
+  set)
+    [[ $# -eq 5 || $# -eq 7 ]] || usage
+    check_devices
+    write_set "$2" "$3" "$4" "$5" "${6:-1}" "${7:-}"
+    ;;
+  inc)
+    [[ $# -eq 2 ]] || usage
+    check_devices
+    load_state
+    new=$((C_BRIGHTNESS + $2))
+    (( new > 100 )) && new=100
+    write_set "$new" "$C_R" "$C_G" "$C_B" 1 "$C_LAST"
+    ;;
+  dec)
+    [[ $# -eq 2 ]] || usage
+    check_devices
+    load_state
+    new=$((C_BRIGHTNESS - $2))
+    (( new < 0 )) && new=0
+    write_set "$new" "$C_R" "$C_G" "$C_B" $(( new > 0 )) "$C_LAST"
+    ;;
+  toggle)
+    [[ $# -eq 1 ]] || usage
+    check_devices
+    load_state
+    if (( C_POWERED )); then
+      write_set 0 "$C_R" "$C_G" "$C_B" 0 "$C_BRIGHTNESS"
+    else
+      write_set "$C_LAST" "$C_R" "$C_G" "$C_B" 1 "$C_LAST"
+    fi
+    ;;
+  get)
+    if [[ -f "$STATE_FILE" ]]; then
+      cat "$STATE_FILE"
+    else
+      echo '{"brightness":100,"r":255,"g":255,"b":255,"poweredOn":true,"lastBrightness":100}'
+    fi
+    ;;
+  *)
+    usage
+    ;;
+esac

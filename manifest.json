@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "kshatriya-abhay.acer-keyboard",
+  "name": "Keyboard RGB",
+  "version": "1.0.0",
+  "author": "Abhay Kshatriya",
+  "description": "Acer keyboard backlight brightness and static color",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Keyboard RGB",
+    "description": "Acer keyboard backlight brightness and static color",
+    "category": "System",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}
