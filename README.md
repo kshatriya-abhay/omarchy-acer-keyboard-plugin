@@ -1,8 +1,9 @@
 # Acer Keyboard RGB
 
 An [omarchy](https://omarchy.org) status-bar widget that controls the Acer
-keyboard backlight — brightness (0–100) and static RGB color (0–255 per
-channel) — for keyboards driven by the `facer` kernel module.
+keyboard backlight — brightness (0–100), RGB color (0–255 per channel), and the
+five animation modes (breathing, neon, wave, shifting, zoom) — for keyboards
+driven by the `facer` kernel module.
 
 This is a drop-in replacement for the RGB/brightness control in
 `acer-predator-turbo-and-rgb-keyboard-linux-module`, integrated into the
@@ -18,8 +19,11 @@ omarchy bar.
   an OSD popup
 - **Static RGB color** input via three R/G/B sliders each with a numeric input
   *and* a `#RRGGBB` hex field (all kept in sync)
+- **Five animation modes** (breathing, neon, wave, shifting, zoom) in a 2×3
+  grid, each with per-mode options: animation speed (0–9), wave/shifting
+  direction, and color where the module honors it
 - Live color swatch and the current color shown directly on the bar button
-- Restores the last applied brightness/color/power state when the shell starts
+- Restores the last applied brightness/color/mode/power state when the shell starts
 - **Module detection** — if the `facer` kernel module or its device nodes are
   missing, the panel shows a warning banner and disables all controls instead
   of failing silently
@@ -93,7 +97,11 @@ Click the keyboard icon in the bar to open the panel:
 - **Color**: drag an R / G / B slider, type into its numeric input, or type a
   `#RRGGBB` value into the hex field — all three stay in sync and apply
   immediately.
-- The last applied state (brightness, color, and power) is restored
+- **Mode**: pick from the 2×3 grid (Static, Breath, Neon, Wave, Shifting,
+  Zoom). Selecting a mode applies it immediately; the **Speed** (0–9) and
+  **Direction** sections appear only for modes that use them. Color options
+  are hidden for Neon and Wave, since the module ignores color for those.
+- The last applied state (mode, brightness, color, and power) is restored
   automatically on the next shell start.
 
 > If the `facer` module or its devices are missing, the panel shows a warning
@@ -118,12 +126,19 @@ o.bind("XF86Presentation", "Keyboard RGB toggle", kbd_rgb .. " toggle", { locked
 
 The subcommands read the persisted state and write the devices:
 
+- `kbd-rgb set <mode> <brightness> <r> <g> <b> <speed> <direction> [<powered> <lastBrightness>]`
+  — apply a full state. `<mode>` is a name (`static`, `breath`, `neon`, `wave`,
+  `shift`, `zoom`) or its code (0–5). Speed is 0–9 (0 pauses the animation);
+  direction is 1 (right → left) or 2 (left → right). The optional power pair is
+  used to persist the on/off switch state.
 - `kbd-rgb inc <percent>` — raise brightness (clamped at 100), powers on
 - `kbd-rgb dec <percent>` — lower brightness (powers off at 0)
 - `kbd-rgb toggle` — flip backlight on/off, restoring the last brightness on
   power-on (same behavior as the panel's power switch)
 - `kbd-rgb status` — prints `ok`, `module-missing`, or `devices-missing`
   (used by the panel to show the warning banner)
+
+`inc`/`dec`/`toggle` preserve the active mode and its parameters.
 
 ### Tips for other Acer users
 
@@ -150,7 +165,7 @@ The subcommands read the persisted state and write the devices:
 - [x] Restore last state on shell start
 - [x] On/off power switch (restores previous brightness)
 - [x] Detect missing device nodes / module and show an "unavailable" warning
-- [ ] Dynamic modes (breath / neon / wave / shift / zoom)
+- [x] Dynamic modes (breath / neon / wave / shift / zoom)
 - [ ] Per-zone color assignment
 - [ ] Profiles (save / load / list)
 - [ ] Turbo-mode indicator

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Acer keyboard RGB helper.
 #
-# Writes static color + brightness to the facer kernel module char devices and
-# persists the last applied state. The devices are write-only, so state.json is
-# the source of truth for the UI.
+# Writes static color or dynamic animation modes to the facer kernel module
+# char devices and persists the last applied state. The devices are
+# write-only, so state.json is the source of truth for the UI.
 #
 # The state file must NOT live inside the plugin directory: omarchy-shell runs
 # inotifywait on ~/.config/omarchy/plugins/ and would see every state write as
@@ -11,7 +11,12 @@
 # under ~/.config/omarchy/ instead (the shell only watches shell.json there,
 # and the plugin watcher only watches the plugins/ subdirectory).
 #
-#   kbd-rgb set <brightness> <r> <g> <b> [<powered> <lastBrightness>]
+# Modes (payload byte[0], from the upstream facer_rgb.py):
+#   0 Static | 1 Breath | 2 Neon | 3 Wave | 4 Shifting | 5 Zoom
+#   Speed 0-9 (0 = no animation, 9 = fastest); direction 1 = Right->Left,
+#   2 = Left->Right (used by Wave/Shifting).
+#
+#   kbd-rgb set <mode> <brightness> <r> <g> <b> <speed> <direction> [<powered> <lastBrightness>]
 #   kbd-rgb inc <percent>    # raise brightness (powers on)
 #   kbd-rgb dec <percent>    # lower brightness (powers off at 0)
 #   kbd-rgb toggle           # backlit RGB on/off (off keeps lastBrightness)
@@ -24,10 +29,12 @@ STATIC_DEV="/dev/acer-gkbbl-static-0"
 STATE_DIR="$HOME/.config/omarchy/kshatriya-abhay.acer-keyboard"
 STATE_FILE="$STATE_DIR/state.json"
 
+DEFAULT_STATE='{"mode":"static","brightness":100,"r":255,"g":255,"b":255,"speed":4,"direction":1,"poweredOn":true,"lastBrightness":100}'
+
 mkdir -p "$STATE_DIR"
 
 usage() {
-  echo "usage: $(basename "$0") set <brightness> <r> <g> <b> [<powered> <lastBrightness>] | inc <percent> | dec <percent> | toggle | status | get" >&2
+  echo "usage: $(basename "$0") set <mode> <brightness> <r> <g> <b> <speed> <direction> [<powered> <lastBrightness>] | inc <percent> | dec <percent> | toggle | status | get" >&2
   exit 2
 }
 
@@ -36,20 +43,44 @@ usage() {
 # in one format string (bash's printf rejects \x followed by '%').
 oct() { printf '%03o' "$1"; }
 
+# mode_name accepts a mode name or code (0-5) and prints the canonical name.
+mode_name() {
+  case "$1" in
+    0) echo static;; 1) echo breath;; 2) echo neon;;
+    3) echo wave;; 4) echo shift;; 5) echo zoom;;
+    static|breath|neon|wave|shift|zoom) echo "$1";;
+  esac
+}
+
+mode_code() {
+  case "$1" in
+    static) echo 0;; breath) echo 1;; neon) echo 2;;
+    wave) echo 3;; shift) echo 4;; zoom) echo 5;;
+  esac
+}
+
 write_set() {
-  local brightness="$1" r="$2" g="$3" b="$4"
-  local powered="${5:-1}" last="${6:-$brightness}"
+  local mode="$1" brightness="$2" r="$3" g="$4" b="$5" speed="$6" direction="$7"
+  local powered="${8:-1}" last="${9:-$brightness}"
 
-  # Static color: one 4-byte write per zone. Zone bitmask = 1 << (zone - 1).
-  for zone in 1 2 4 8; do
-    printf "\\$(oct "$zone")\\$(oct "$r")\\$(oct "$g")\\$(oct "$b")" > "$STATIC_DEV"
-  done
+  if [[ "$mode" == static ]]; then
+    # Static color: one 4-byte write per zone. Zone bitmask = 1 << (zone - 1).
+    for zone in 1 2 4 8; do
+      printf "\\$(oct "$zone")\\$(oct "$r")\\$(oct "$g")\\$(oct "$b")" > "$STATIC_DEV"
+    done
+    # Static mode + brightness: byte[2] = brightness, byte[9] = 1.
+    printf "\\$(oct 0)\\$(oct 0)\\$(oct "$brightness")\\$(oct 0)\\$(oct 0)\\$(oct 0)\\$(oct 0)\\$(oct 0)\\$(oct 0)\\$(oct 1)\\$(oct 0)\\$(oct 0)\\$(oct 0)\\$(oct 0)\\$(oct 0)\\$(oct 0)" > "$DYNAMIC_DEV"
+  else
+    local code flag
+    code=$(mode_code "$mode")
+    [[ -n "$code" ]] || { echo "invalid mode: $mode" >&2; exit 2; }
+    flag=0; [[ "$mode" == wave ]] && flag=8
+    # Dynamic mode: [mode, speed, brightness, flag, direction, r, g, b, 0, 1, ...].
+    printf "\\$(oct "$code")\\$(oct "$speed")\\$(oct "$brightness")\\$(oct "$flag")\\$(oct "$direction")\\$(oct "$r")\\$(oct "$g")\\$(oct "$b")\\$(oct 0)\\$(oct 1)\\$(oct 0)\\$(oct 0)\\$(oct 0)\\$(oct 0)\\$(oct 0)\\$(oct 0)" > "$DYNAMIC_DEV"
+  fi
 
-  # Static mode + brightness: 16-byte payload, byte[2] = brightness, byte[9] = 1.
-  printf "\\$(oct 0)\\$(oct 0)\\$(oct "$brightness")\\$(oct 0)\\$(oct 0)\\$(oct 0)\\$(oct 0)\\$(oct 0)\\$(oct 0)\\$(oct 1)\\$(oct 0)\\$(oct 0)\\$(oct 0)\\$(oct 0)\\$(oct 0)\\$(oct 0)" > "$DYNAMIC_DEV"
-
-  printf '{"brightness":%d,"r":%d,"g":%d,"b":%d,"poweredOn":%s,"lastBrightness":%d}\n' \
-    "$brightness" "$r" "$g" "$b" "$powered" "$last" > "$STATE_FILE"
+  printf '{"mode":"%s","brightness":%d,"r":%d,"g":%d,"b":%d,"speed":%d,"direction":%d,"poweredOn":%s,"lastBrightness":%d}\n' \
+    "$mode" "$brightness" "$r" "$g" "$b" "$speed" "$direction" "$powered" "$last" > "$STATE_FILE"
 }
 
 check_devices() {
@@ -61,24 +92,31 @@ check_devices() {
 # Load persisted state into C_* globals (sensible defaults if absent).
 load_state() {
   local s
-  s=$(cat "$STATE_FILE" 2>/dev/null) || s='{"brightness":100,"r":255,"g":255,"b":255,"poweredOn":true,"lastBrightness":100}'
+  s=$(cat "$STATE_FILE" 2>/dev/null) || s="$DEFAULT_STATE"
+  C_MODE=$(sed -n 's/.*"mode":"\([^"]*\)".*/\1/p' <<<"$s")
   C_BRIGHTNESS=$(sed -n 's/.*"brightness":\([0-9]*\).*/\1/p' <<<"$s")
   C_R=$(sed -n 's/.*"r":\([0-9]*\).*/\1/p' <<<"$s")
   C_G=$(sed -n 's/.*"g":\([0-9]*\).*/\1/p' <<<"$s")
   C_B=$(sed -n 's/.*"b":\([0-9]*\).*/\1/p' <<<"$s")
+  C_SPEED=$(sed -n 's/.*"speed":\([0-9]*\).*/\1/p' <<<"$s")
+  C_DIRECTION=$(sed -n 's/.*"direction":\([0-9]*\).*/\1/p' <<<"$s")
   C_POWERED=$(sed -n 's/.*"poweredOn":\([^,}]*\).*/\1/p' <<<"$s")
   C_LAST=$(sed -n 's/.*"lastBrightness":\([0-9]*\).*/\1/p' <<<"$s")
   [[ "$C_POWERED" == true ]] && C_POWERED=1
   [[ "$C_POWERED" == false ]] && C_POWERED=0
-  C_BRIGHTNESS=${C_BRIGHTNESS:-100}; C_R=${C_R:-255}; C_G=${C_G:-255}; C_B=${C_B:-255}
+  C_MODE=${C_MODE:-static}; C_BRIGHTNESS=${C_BRIGHTNESS:-100}
+  C_R=${C_R:-255}; C_G=${C_G:-255}; C_B=${C_B:-255}
+  C_SPEED=${C_SPEED:-4}; C_DIRECTION=${C_DIRECTION:-1}
   C_POWERED=${C_POWERED:-1}; C_LAST=${C_LAST:-100}
 }
 
 case "${1:-}" in
   set)
-    [[ $# -eq 5 || $# -eq 7 ]] || usage
+    [[ $# -eq 8 || $# -eq 10 ]] || usage
+    m=$(mode_name "$2")
+    [[ -z "$m" ]] && { echo "invalid mode: $2" >&2; exit 2; }
     check_devices
-    write_set "$2" "$3" "$4" "$5" "${6:-1}" "${7:-}"
+    write_set "$m" "$3" "$4" "$5" "$6" "$7" "$8" "${9:-1}" "${10:-}"
     ;;
   inc)
     [[ $# -eq 2 ]] || usage
@@ -86,7 +124,7 @@ case "${1:-}" in
     load_state
     new=$((C_BRIGHTNESS + $2))
     (( new > 100 )) && new=100
-    write_set "$new" "$C_R" "$C_G" "$C_B" 1 "$C_LAST"
+    write_set "$C_MODE" "$new" "$C_R" "$C_G" "$C_B" "$C_SPEED" "$C_DIRECTION" 1 "$C_LAST"
     ;;
   dec)
     [[ $# -eq 2 ]] || usage
@@ -94,16 +132,16 @@ case "${1:-}" in
     load_state
     new=$((C_BRIGHTNESS - $2))
     (( new < 0 )) && new=0
-    write_set "$new" "$C_R" "$C_G" "$C_B" $(( new > 0 )) "$C_LAST"
+    write_set "$C_MODE" "$new" "$C_R" "$C_G" "$C_B" "$C_SPEED" "$C_DIRECTION" $(( new > 0 )) "$C_LAST"
     ;;
   toggle)
     [[ $# -eq 1 ]] || usage
     check_devices
     load_state
     if (( C_POWERED )); then
-      write_set 0 "$C_R" "$C_G" "$C_B" 0 "$C_BRIGHTNESS"
+      write_set "$C_MODE" 0 "$C_R" "$C_G" "$C_B" "$C_SPEED" "$C_DIRECTION" 0 "$C_BRIGHTNESS"
     else
-      write_set "$C_LAST" "$C_R" "$C_G" "$C_B" 1 "$C_LAST"
+      write_set "$C_MODE" "$C_LAST" "$C_R" "$C_G" "$C_B" "$C_SPEED" "$C_DIRECTION" 1 "$C_LAST"
     fi
     ;;
   status)
@@ -120,7 +158,7 @@ case "${1:-}" in
     if [[ -f "$STATE_FILE" ]]; then
       cat "$STATE_FILE"
     else
-      echo '{"brightness":100,"r":255,"g":255,"b":255,"poweredOn":true,"lastBrightness":100}'
+      echo "$DEFAULT_STATE"
     fi
     ;;
   *)

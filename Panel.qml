@@ -33,6 +33,11 @@ Panel {
   property bool available: true
   property string availabilityIssue: ""
 
+  // Active animation mode and its parameters (persisted via kbd-rgb).
+  property string mode: "static"
+  property int speed: 4
+  property int direction: 1
+
   property bool applyQueued: false
   property bool restored: false
   property real wheelAccumulator: 0
@@ -41,7 +46,7 @@ Panel {
   property int selectedIndex: -1
   property bool cursorActive: false
 
-  readonly property var visibleSections: ["brightness", "color"]
+  readonly property var visibleSections: root.computeSections()
   readonly property bool headerHasCursor: root.cursorActive && root.focusSection === "header"
 
   function helperPath() {
@@ -67,7 +72,9 @@ Panel {
     }
     root.applyQueued = false
     applyProc.command = [root.helperPath(), "set",
+      root.mode,
       String(root.brightnessPercent), String(root.red), String(root.green), String(root.blue),
+      String(root.speed), String(root.direction),
       root.poweredOn ? "1" : "0", String(root.lastBrightness)]
     applyProc.running = true
   }
@@ -155,19 +162,63 @@ Panel {
     root.queueApply()
   }
 
+  // ---- modes ---------------------------------------------------------------
+  // Sections shown depend on the active mode: speed only for animations,
+  // direction only for wave/shifting, color hidden where the module ignores it.
+  function computeSections() {
+    var s = ["brightness", "mode"]
+    if (Model.isDynamic(root.mode)) s.push("speed")
+    if (Model.usesDirection(root.mode)) s.push("direction")
+    if (Model.usesColor(root.mode)) s.push("color")
+    return s
+  }
+
+  function setMode(name) {
+    if (name === root.mode) return
+    root.mode = name
+    root.clampCursor()
+    root.apply()
+  }
+
+  // h/l moves within the 2x3 grid.
+  function adjustMode(delta) {
+    if (root.focusSection !== "mode") return
+    var t = root.selectedIndex + delta
+    if (t >= 0 && t < Model.MODES.length) root.selectedIndex = t
+  }
+
+  function adjustSpeed(delta) {
+    if (root.focusSection !== "speed") return
+    root.speed = Model.clampSpeed(root.speed + delta)
+    root.apply()
+  }
+
+  // Direction has two values (1: right->left, 2: left->right); any horizontal
+  // key toggles between them.
+  function adjustDirection() {
+    if (root.focusSection !== "direction") return
+    root.direction = root.direction === 1 ? 2 : 1
+    root.apply()
+  }
+
   // ---- keyboard cursor model ----------------------------------------------
   function sectionCount(section) {
     if (section === "brightness") return 0  // single slider sentinel at -1
+    if (section === "mode") return Model.MODES.length
+    if (section === "speed") return 0
+    if (section === "direction") return 0
     if (section === "color") return 4       // R, G, B, hex
     return 0
   }
 
   function sectionIsSingleRow(section) {
-    return section === "brightness"
+    return section === "brightness" || section === "speed" || section === "direction"
   }
 
   function sectionFirstIndex(section) {
     if (section === "brightness") return -1
+    if (section === "speed") return -1
+    if (section === "direction") return -1
     return 0
   }
 
@@ -179,6 +230,17 @@ Panel {
       }
       return
     }
+    // The mode grid is 2 rows of 3: j/k jump a whole row. At the top/bottom
+    // edge the grid can't move further, so the move becomes a section change.
+    var forceExit = false
+    if (root.focusSection === "mode") {
+      var gridTarget = root.selectedIndex + delta * 3
+      if (gridTarget >= 0 && gridTarget < Model.MODES.length) {
+        root.selectedIndex = gridTarget
+        return
+      }
+      forceExit = true
+    }
     var sections = root.visibleSections
     if (!sections || sections.length === 0) return
     var sIdx = sections.indexOf(root.focusSection)
@@ -187,7 +249,7 @@ Panel {
       root.selectedIndex = root.sectionFirstIndex(root.focusSection)
       return
     }
-    var inSingleRow = root.sectionIsSingleRow(root.focusSection)
+    var inSingleRow = root.sectionIsSingleRow(root.focusSection) || forceExit
     var max = inSingleRow ? 0 : root.sectionCount(root.focusSection) - 1
 
     if (delta > 0) {
@@ -215,6 +277,10 @@ Panel {
 
   function activateCursor() {
     if (root.focusSection === "header") { root.togglePower(); return }
+    if (root.focusSection === "mode") {
+      root.setMode(Model.MODES[root.selectedIndex].name)
+      return
+    }
     if (root.focusSection !== "color") return
     var target = root.colorFieldAt(root.selectedIndex)
     if (target) target.forceActiveFocus()
@@ -300,6 +366,10 @@ Panel {
         root.blue = state.b
         root.poweredOn = state.poweredOn
         root.lastBrightness = state.lastBrightness
+        root.mode = state.mode
+        root.speed = state.speed
+        root.direction = state.direction
+        root.clampCursor()
         root.syncColorFields()
       }
     }
@@ -391,6 +461,9 @@ Panel {
         else if (dx !== 0) {
           if (root.focusSection === "brightness") root.adjustBrightness(dx * 5)
           else if (root.focusSection === "color") root.adjustChannel(dx * 5)
+          else if (root.focusSection === "mode") root.adjustMode(dx)
+          else if (root.focusSection === "speed") root.adjustSpeed(dx)
+          else if (root.focusSection === "direction") root.adjustDirection()
         }
       }
       onActivateRequested: if (root.cursorActive) root.activateCursor()
@@ -520,7 +593,7 @@ Panel {
               }
 
               Text {
-                text: "RGB · " + root.hexValue.toUpperCase()
+                text: Model.modeLabel(root.mode).toUpperCase() + " · " + root.hexValue.toUpperCase()
                 color: Qt.darker(root.bar.foreground, 1.4)
                 font.family: root.bar.fontFamily
                 font.pixelSize: Style.font.caption
@@ -606,12 +679,257 @@ Panel {
             }
           }
 
-          // ---------- Color ----------
+          // ---------- Mode ----------
           PanelSeparator {
             foreground: root.bar.foreground
           }
 
           Column {
+            width: parent.width
+            spacing: Style.space(6)
+
+            Item {
+              width: parent.width
+              implicitHeight: Math.max(modeHeader.implicitHeight, modeValue.implicitHeight)
+
+              PanelSectionHeader {
+                id: modeHeader
+                text: "MODE"
+                foreground: root.bar.foreground
+                fontFamily: root.bar.fontFamily
+                anchors.left: parent.left
+                anchors.verticalCenter: parent.verticalCenter
+              }
+
+              Text {
+                id: modeValue
+                text: Model.modeLabel(root.mode)
+                color: Qt.darker(root.bar.foreground, 1.4)
+                font.family: root.bar.fontFamily
+                font.pixelSize: Style.font.caption
+                font.bold: true
+                anchors.right: parent.right
+                anchors.rightMargin: Style.space(6)
+                anchors.verticalCenter: parent.verticalCenter
+              }
+            }
+
+            CursorSurface {
+              id: modeGrid
+              width: parent.width
+              height: modeGridContent.implicitHeight + Style.spacing.controlGap
+              hasCursor: root.cursorActive && root.focusSection === "mode"
+              onHasCursorChanged: if (hasCursor) root.ensureCursorVisible(modeGrid)
+              foreground: root.bar.foreground
+              outline: true
+
+              Grid {
+                id: modeGridContent
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.leftMargin: Style.space(6)
+                anchors.rightMargin: Style.space(6)
+                columns: 3
+                rows: 2
+                columnSpacing: Style.space(8)
+                rowSpacing: Style.space(8)
+
+                Repeater {
+                  model: Model.MODES
+                  delegate: Button {
+                    id: modeButton
+                    required property var modelData
+                    required property int index
+
+                    width: Math.floor((modeGridContent.width - modeGridContent.columnSpacing * 2) / 3)
+                    text: modeButton.modelData.label
+                    selected: modeButton.modelData.name === root.mode
+                    hasCursor: root.cursorActive && root.focusSection === "mode" && root.selectedIndex === index
+                    enabled: root.available
+                    foreground: root.bar.foreground
+                    fontFamily: root.bar.fontFamily
+                    onClicked: root.setMode(modeButton.modelData.name)
+                    onHovered: function(on) {
+                      if (!on) return
+                      root.cursorActive = true
+                      root.focusSection = "mode"
+                      root.selectedIndex = index
+                    }
+                  }
+                }
+              }
+            }
+          }
+
+          // ---------- Speed (animations) ----------
+          Column {
+            id: speedSection
+            visible: Model.isDynamic(root.mode)
+            width: parent.width
+            spacing: Style.space(6)
+
+            Item {
+              width: parent.width
+              implicitHeight: Math.max(speedHeader.implicitHeight, speedValue.implicitHeight)
+
+              PanelSectionHeader {
+                id: speedHeader
+                text: "SPEED"
+                foreground: root.bar.foreground
+                fontFamily: root.bar.fontFamily
+                anchors.left: parent.left
+                anchors.verticalCenter: parent.verticalCenter
+              }
+
+              Text {
+                id: speedValue
+                text: speedSlider.dragging ? speedSlider.liveValue : root.speed
+                color: Qt.darker(root.bar.foreground, 1.4)
+                font.family: root.bar.fontFamily
+                font.pixelSize: Style.font.caption
+                font.bold: true
+                anchors.right: parent.right
+                anchors.rightMargin: Style.space(6)
+                anchors.verticalCenter: parent.verticalCenter
+              }
+            }
+
+            CursorSurface {
+              id: speedRow
+              width: parent.width
+              height: speedSlider.implicitHeight + Style.spacing.controlGap
+              hasCursor: root.cursorActive && root.focusSection === "speed" && root.selectedIndex === -1
+              onHasCursorChanged: if (hasCursor) root.ensureCursorVisible(speedRow)
+              foreground: root.bar.foreground
+              outline: true
+
+              PanelSlider {
+                id: speedSlider
+                bar: root.bar
+                enabled: root.available
+                anchors.fill: parent
+                anchors.leftMargin: Style.space(6)
+                anchors.rightMargin: Style.space(6)
+                minimum: 0
+                maximum: 9
+                step: 1
+                integer: true
+                value: root.speed
+                onMoved: function(v) { root.speed = v; root.queueApply() }
+                onReleased: function(v) {
+                  commitTimer.stop()
+                  root.speed = v
+                  root.apply()
+                }
+              }
+
+              HoverHandler {
+                onHoveredChanged: if (hovered) {
+                  root.cursorActive = true
+                  root.focusSection = "speed"
+                  root.selectedIndex = -1
+                }
+              }
+            }
+          }
+
+          // ---------- Direction (wave / shifting) ----------
+          Column {
+            id: directionSection
+            visible: Model.usesDirection(root.mode)
+            width: parent.width
+            spacing: Style.space(6)
+
+            Item {
+              width: parent.width
+              implicitHeight: Math.max(directionHeader.implicitHeight, directionValue.implicitHeight)
+
+              PanelSectionHeader {
+                id: directionHeader
+                text: "DIRECTION"
+                foreground: root.bar.foreground
+                fontFamily: root.bar.fontFamily
+                anchors.left: parent.left
+                anchors.verticalCenter: parent.verticalCenter
+              }
+
+              Text {
+                id: directionValue
+                text: root.direction === 1 ? "Right to Left" : "Left to Right"
+                color: Qt.darker(root.bar.foreground, 1.4)
+                font.family: root.bar.fontFamily
+                font.pixelSize: Style.font.caption
+                font.bold: true
+                anchors.right: parent.right
+                anchors.rightMargin: Style.space(6)
+                anchors.verticalCenter: parent.verticalCenter
+              }
+            }
+
+            CursorSurface {
+              id: directionRow
+              width: parent.width
+              height: directionButtons.implicitHeight + Style.spacing.controlGap
+              hasCursor: root.cursorActive && root.focusSection === "direction" && root.selectedIndex === -1
+              onHasCursorChanged: if (hasCursor) root.ensureCursorVisible(directionRow)
+              foreground: root.bar.foreground
+              outline: true
+
+              Row {
+                id: directionButtons
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.leftMargin: Style.space(6)
+                anchors.rightMargin: Style.space(6)
+                spacing: Style.space(8)
+
+                Button {
+                  id: dirLeftButton
+                  width: (directionButtons.width - directionButtons.spacing) / 2
+                  text: "←  Right to Left"
+                  selected: root.direction === 1
+                  enabled: root.available
+                  foreground: root.bar.foreground
+                  fontFamily: root.bar.fontFamily
+                  onClicked: { root.direction = 1; root.apply() }
+                  onHovered: function(on) {
+                    if (!on) return
+                    root.cursorActive = true
+                    root.focusSection = "direction"
+                    root.selectedIndex = -1
+                  }
+                }
+
+                Button {
+                  id: dirRightButton
+                  width: (directionButtons.width - directionButtons.spacing) / 2
+                  text: "Left to Right  →"
+                  selected: root.direction === 2
+                  enabled: root.available
+                  foreground: root.bar.foreground
+                  fontFamily: root.bar.fontFamily
+                  onClicked: { root.direction = 2; root.apply() }
+                  onHovered: function(on) {
+                    if (!on) return
+                    root.cursorActive = true
+                    root.focusSection = "direction"
+                    root.selectedIndex = -1
+                  }
+                }
+              }
+            }
+          }
+
+          // ---------- Color (static / breath / shifting / zoom) ----------
+          PanelSeparator {
+            visible: Model.usesColor(root.mode)
+            foreground: root.bar.foreground
+          }
+
+          Column {
+            visible: Model.usesColor(root.mode)
             width: parent.width
             spacing: Style.space(10)
 
