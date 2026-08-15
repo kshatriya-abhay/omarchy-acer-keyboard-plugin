@@ -129,7 +129,8 @@ The subcommands read the persisted state and write the devices:
 - `kbd-rgb set <mode> <brightness> <r> <g> <b> <speed> <direction> [<powered> <lastBrightness>]`
   — apply a full state. `<mode>` is a name (`static`, `breath`, `neon`, `wave`,
   `shift`, `zoom`) or its code (0–5). Speed is 0–9 (0 pauses the animation);
-  direction is 1 (right → left) or 2 (left → right). The optional power pair is
+  direction is 1 (left → right) or 2 (right → left) — note the firmware
+  interprets these opposite to facer_rgb.py's CLI help. The optional power pair is
   used to persist the on/off switch state.
 - `kbd-rgb inc <percent>` — raise brightness (clamped at 100), powers on
 - `kbd-rgb dec <percent>` — lower brightness (powers off at 0)

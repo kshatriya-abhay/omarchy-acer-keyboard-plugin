@@ -856,7 +856,7 @@ Panel {
 
               Text {
                 id: directionValue
-                text: root.direction === 1 ? "Right to Left" : "Left to Right"
+                text: root.direction === 1 ? "Left to Right" : "Right to Left"
                 color: Qt.darker(root.bar.foreground, 1.4)
                 font.family: root.bar.fontFamily
                 font.pixelSize: Style.font.caption
@@ -889,11 +889,11 @@ Panel {
                   id: dirLeftButton
                   width: (directionButtons.width - directionButtons.spacing) / 2
                   text: "←  Right to Left"
-                  selected: root.direction === 1
+                  selected: root.direction === 2
                   enabled: root.available
                   foreground: root.bar.foreground
                   fontFamily: root.bar.fontFamily
-                  onClicked: { root.direction = 1; root.apply() }
+                  onClicked: { root.direction = 2; root.apply() }
                   onHovered: function(on) {
                     if (!on) return
                     root.cursorActive = true
@@ -906,11 +906,11 @@ Panel {
                   id: dirRightButton
                   width: (directionButtons.width - directionButtons.spacing) / 2
                   text: "Left to Right  →"
-                  selected: root.direction === 2
+                  selected: root.direction === 1
                   enabled: root.available
                   foreground: root.bar.foreground
                   fontFamily: root.bar.fontFamily
-                  onClicked: { root.direction = 2; root.apply() }
+                  onClicked: { root.direction = 1; root.apply() }
                   onHovered: function(on) {
                     if (!on) return
                     root.cursorActive = true

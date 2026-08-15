@@ -13,8 +13,10 @@
 #
 # Modes (payload byte[0], from the upstream facer_rgb.py):
 #   0 Static | 1 Breath | 2 Neon | 3 Wave | 4 Shifting | 5 Zoom
-#   Speed 0-9 (0 = no animation, 9 = fastest); direction 1 = Right->Left,
-#   2 = Left->Right (used by Wave/Shifting).
+#   Speed 0-9 (0 = no animation, 9 = fastest); direction 1 = Left->Right,
+#   2 = Right->Left (used by Wave/Shifting). Note: the firmware interprets the
+#   direction byte opposite to facer_rgb.py's CLI help, so 1 = Left->Right and
+#   2 = Right->Left in practice.
 #
 #   kbd-rgb set <mode> <brightness> <r> <g> <b> <speed> <direction> [<powered> <lastBrightness>]
 #   kbd-rgb inc <percent>    # raise brightness (powers on)
