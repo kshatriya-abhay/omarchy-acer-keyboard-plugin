@@ -20,6 +20,9 @@ omarchy bar.
   *and* a `#RRGGBB` hex field (all kept in sync)
 - Live color swatch and the current color shown directly on the bar button
 - Restores the last applied brightness/color/power state when the shell starts
+- **Module detection** — if the `facer` kernel module or its device nodes are
+  missing, the panel shows a warning banner and disables all controls instead
+  of failing silently
 - Keyboard-navigable popup (j/k/h/l + Enter), matching omarchy's monitor panel
 - Keyboard shortcuts for brightness (10% steps) and a backlight on/off toggle via
   the `XF86Presentation` (Nitro) key
@@ -93,6 +96,11 @@ Click the keyboard icon in the bar to open the panel:
 - The last applied state (brightness, color, and power) is restored
   automatically on the next shell start.
 
+> If the `facer` module or its devices are missing, the panel shows a warning
+> banner (with the specific cause) and the controls are disabled. Run
+> `kbd-rgb status` for a quick check — it prints `ok`, `module-missing`, or
+> `devices-missing`.
+
 ## Keyboard shortcuts
 
 The `kbd-rgb` helper also exposes brightness and power subcommands that can be
@@ -114,6 +122,8 @@ The subcommands read the persisted state and write the devices:
 - `kbd-rgb dec <percent>` — lower brightness (powers off at 0)
 - `kbd-rgb toggle` — flip backlight on/off, restoring the last brightness on
   power-on (same behavior as the panel's power switch)
+- `kbd-rgb status` — prints `ok`, `module-missing`, or `devices-missing`
+  (used by the panel to show the warning banner)
 
 ### Tips for other Acer users
 
@@ -139,7 +149,7 @@ The subcommands read the persisted state and write the devices:
 - [x] Static RGB color with R/G/B sliders and hex inputs
 - [x] Restore last state on shell start
 - [x] On/off power switch (restores previous brightness)
-- [ ] Detect missing device nodes and show an "unavailable" state
+- [x] Detect missing device nodes / module and show an "unavailable" warning
 - [ ] Dynamic modes (breath / neon / wave / shift / zoom)
 - [ ] Per-zone color assignment
 - [ ] Profiles (save / load / list)

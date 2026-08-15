@@ -15,6 +15,7 @@
 #   kbd-rgb inc <percent>    # raise brightness (powers on)
 #   kbd-rgb dec <percent>    # lower brightness (powers off at 0)
 #   kbd-rgb toggle           # backlit RGB on/off (off keeps lastBrightness)
+#   kbd-rgb status           # ok | module-missing | devices-missing
 #   kbd-rgb get
 set -euo pipefail
 
@@ -26,7 +27,7 @@ STATE_FILE="$STATE_DIR/state.json"
 mkdir -p "$STATE_DIR"
 
 usage() {
-  echo "usage: $(basename "$0") set <brightness> <r> <g> <b> [<powered> <lastBrightness>] | inc <percent> | dec <percent> | toggle | get" >&2
+  echo "usage: $(basename "$0") set <brightness> <r> <g> <b> [<powered> <lastBrightness>] | inc <percent> | dec <percent> | toggle | status | get" >&2
   exit 2
 }
 
@@ -103,6 +104,16 @@ case "${1:-}" in
       write_set 0 "$C_R" "$C_G" "$C_B" 0 "$C_BRIGHTNESS"
     else
       write_set "$C_LAST" "$C_R" "$C_G" "$C_B" 1 "$C_LAST"
+    fi
+    ;;
+  status)
+    [[ $# -eq 1 ]] || usage
+    if [[ ! -d /sys/module/facer ]]; then
+      echo "module-missing"
+    elif [[ ! -e "$STATIC_DEV" || ! -e "$DYNAMIC_DEV" ]]; then
+      echo "devices-missing"
+    else
+      echo "ok"
     fi
     ;;
   get)

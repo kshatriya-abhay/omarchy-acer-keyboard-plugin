@@ -27,6 +27,12 @@ Panel {
   property bool poweredOn: true
   property int lastBrightness: 100
 
+  // Whether the facer module + device nodes are present (checked via
+  // `kbd-rgb status`). When false, the panel shows a warning banner and all
+  // controls are disabled so nothing attempts to write to missing devices.
+  property bool available: true
+  property string availabilityIssue: ""
+
   property bool applyQueued: false
   property bool restored: false
   property real wheelAccumulator: 0
@@ -48,11 +54,13 @@ Panel {
   }
 
   function refresh() {
+    if (!statusProc.running) statusProc.running = true
     if (!stateProc.running) stateProc.running = true
   }
 
   // ---- apply pipeline -----------------------------------------------------
   function apply() {
+    if (!root.available) return
     if (applyProc.running) {
       root.applyQueued = true
       return
@@ -71,6 +79,7 @@ Panel {
   // Any direct brightness change while the keyboard is switched off turns it
   // back on — the user clearly wants light.
   function userSetBrightness(value) {
+    if (!root.available) return
     var v = Model.clampBrightness(value)
     if (v > 0 && !root.poweredOn) root.poweredOn = true
     root.brightnessPercent = v
@@ -83,6 +92,7 @@ Panel {
 
   // Power switch: off writes brightness 0, on restores the previous level.
   function togglePower() {
+    if (!root.available) return
     if (root.poweredOn) {
       if (root.brightnessPercent > 0) root.lastBrightness = root.brightnessPercent
       root.brightnessPercent = 0
@@ -110,6 +120,7 @@ Panel {
   }
 
   function commitHex(raw) {
+    if (!root.available) return
     var rgb = Model.hexToRgb(raw)
     if (rgb) {
       root.red = rgb.r
@@ -290,10 +301,32 @@ Panel {
         root.poweredOn = state.poweredOn
         root.lastBrightness = state.lastBrightness
         root.syncColorFields()
-        // Restore the last applied color/brightness on plugin load.
+      }
+    }
+  }
+
+  Process {
+    id: statusProc
+    command: [root.helperPath(), "status"]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        var out = String(text || "").trim()
+        if (out === "module-missing") {
+          root.available = false
+          root.availabilityIssue = "Acer keyboard kernel module (facer) not found. Install acer-predator-turbo-and-rgb-keyboard-linux-module and load it."
+        } else if (out === "devices-missing") {
+          root.available = false
+          root.availabilityIssue = "facer is loaded but the /dev/acer-gkbbl-* device nodes are missing. Check module parameters or udev rules."
+        } else {
+          root.available = true
+          root.availabilityIssue = ""
+        }
+        // Restore the last applied color/brightness on plugin load, but only
+        // once availability is known (and only when devices exist).
         if (root.setting("applyOnStart", true) && !root.restored) {
           root.restored = true
-          root.apply()
+          if (root.available) root.apply()
         }
       }
     }
@@ -381,6 +414,50 @@ Panel {
           width: scrollArea.availableWidth
           spacing: Style.space(14)
 
+          // ---------- Warning banner (module / devices missing) ----------
+          Rectangle {
+            id: warningBanner
+            visible: !root.available
+            width: parent.width
+            implicitHeight: warningMessage.implicitHeight + Style.space(18)
+            radius: Style.cornerRadius
+            color: Util.alpha(Color.urgent, 0.10)
+            border.color: Util.alpha(Color.urgent, 0.45)
+            border.width: 1
+
+            Row {
+              id: warningRow
+              anchors.left: parent.left
+              anchors.right: parent.right
+              anchors.verticalCenter: parent.verticalCenter
+              anchors.leftMargin: Style.space(12)
+              anchors.rightMargin: Style.space(12)
+              spacing: Style.space(10)
+
+              Text {
+                id: warningIcon
+                text: "⚠"
+                color: Color.urgent
+                font.family: root.bar.fontFamily
+                font.pixelSize: Style.font.body
+                anchors.verticalCenter: parent.verticalCenter
+              }
+
+              Text {
+                id: warningMessage
+                text: root.availabilityIssue !== ""
+                  ? root.availabilityIssue
+                  : "Acer keyboard control is unavailable."
+                color: Color.urgent
+                font.family: root.bar.fontFamily
+                font.pixelSize: Style.font.caption
+                wrapMode: Text.Wrap
+                width: warningRow.width - warningIcon.width - warningRow.spacing
+                anchors.verticalCenter: parent.verticalCenter
+              }
+            }
+          }
+
           // ---------- Hero: keyboard icon · title/status · power switch ----------
           Item {
             width: parent.width
@@ -404,6 +481,7 @@ Panel {
             ToggleSwitch {
               id: powerSwitch
               checked: root.poweredOn
+              enabled: root.available
               hasCursor: root.headerHasCursor
               foreground: root.bar.foreground
               anchors.right: parent.right
@@ -501,6 +579,7 @@ Panel {
               PanelSlider {
                 id: brightnessSlider
                 bar: root.bar
+                enabled: root.available
                 anchors.fill: parent
                 anchors.leftMargin: Style.space(6)
                 anchors.rightMargin: Style.space(6)
@@ -595,6 +674,7 @@ Panel {
                 PanelSlider {
                   id: redSlider
                   bar: root.bar
+                  enabled: root.available
                   width: Math.max(40, redInner.width - redLabel.width - redNum.width - redInner.spacing * 2)
                   minimum: 0
                   maximum: 255
@@ -609,6 +689,7 @@ Panel {
                 NumberField {
                   id: redNum
                   value: root.red
+                  enabled: root.available
                   from: 0
                   to: 255
                   stepSize: 1
@@ -661,6 +742,7 @@ Panel {
                 PanelSlider {
                   id: greenSlider
                   bar: root.bar
+                  enabled: root.available
                   width: Math.max(40, greenInner.width - greenLabel.width - greenNum.width - greenInner.spacing * 2)
                   minimum: 0
                   maximum: 255
@@ -675,6 +757,7 @@ Panel {
                 NumberField {
                   id: greenNum
                   value: root.green
+                  enabled: root.available
                   from: 0
                   to: 255
                   stepSize: 1
@@ -727,6 +810,7 @@ Panel {
                 PanelSlider {
                   id: blueSlider
                   bar: root.bar
+                  enabled: root.available
                   width: Math.max(40, blueInner.width - blueLabel.width - blueNum.width - blueInner.spacing * 2)
                   minimum: 0
                   maximum: 255
@@ -741,6 +825,7 @@ Panel {
                 NumberField {
                   id: blueNum
                   value: root.blue
+                  enabled: root.available
                   from: 0
                   to: 255
                   stepSize: 1
@@ -772,6 +857,7 @@ Panel {
 
               TextField {
                 id: hexField
+                enabled: root.available
                 width: parent.width - Style.space(12)
                 anchors.horizontalCenter: parent.horizontalCenter
                 anchors.verticalCenter: parent.verticalCenter
