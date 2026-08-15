@@ -18,12 +18,20 @@
 #   direction byte opposite to facer_rgb.py's CLI help, so 1 = Left->Right and
 #   2 = Right->Left in practice.
 #
-#   kbd-rgb set <mode> <brightness> <r> <g> <b> <speed> <direction> [<powered> <lastBrightness>]
+#   kbd-rgb set <mode> <brightness> <r> <g> <b> <speed> <direction> [<powered> <lastBrightness>] [<zone> <zones>]
 #   kbd-rgb inc <percent>    # raise brightness (powers on)
 #   kbd-rgb dec <percent>    # lower brightness (powers off at 0)
 #   kbd-rgb toggle           # backlit RGB on/off (off keeps lastBrightness)
 #   kbd-rgb status           # ok | module-missing | devices-missing
 #   kbd-rgb get
+#
+# <zone> is all|1|2|3|4 (the zone button the edit happened on). <zones> is a
+# semicolon-separated list of four "r,g,b" triplets, one per zone. Only static
+# mode is per-zone: the active zone's triplet is set from <r> <g> <b> (all = all
+# four), the other zones keep their persisted colors, and every zone device is
+# rewritten from the merged set. The UI passes the full zone table so the helper
+# can keep it in sync with the panel; dynamic modes ignore it for the payload but
+# still persist it.
 set -euo pipefail
 
 DYNAMIC_DEV="/dev/acer-gkbbl-0"
@@ -31,12 +39,12 @@ STATIC_DEV="/dev/acer-gkbbl-static-0"
 STATE_DIR="$HOME/.config/omarchy/kshatriya-abhay.acer-keyboard"
 STATE_FILE="$STATE_DIR/state.json"
 
-DEFAULT_STATE='{"mode":"static","brightness":100,"r":255,"g":255,"b":255,"speed":4,"direction":1,"poweredOn":true,"lastBrightness":100}'
+DEFAULT_STATE='{"mode":"static","brightness":100,"r":255,"g":255,"b":255,"speed":4,"direction":1,"poweredOn":true,"lastBrightness":100,"zone":"all","zones":[[255,255,255],[255,255,255],[255,255,255],[255,255,255]]}'
 
 mkdir -p "$STATE_DIR"
 
 usage() {
-  echo "usage: $(basename "$0") set <mode> <brightness> <r> <g> <b> <speed> <direction> [<powered> <lastBrightness>] | inc <percent> | dec <percent> | toggle | status | get" >&2
+  echo "usage: $(basename "$0") set <mode> <brightness> <r> <g> <b> <speed> <direction> [<powered> <lastBrightness>] [<zone> <zones>] | inc <percent> | dec <percent> | toggle | status | get" >&2
   exit 2
 }
 
@@ -64,11 +72,33 @@ mode_code() {
 write_set() {
   local mode="$1" brightness="$2" r="$3" g="$4" b="$5" speed="$6" direction="$7"
   local powered="${8:-1}" last="${9:-$brightness}"
+  local zone="${10:-all}" zones="${11:-}"
+
+  # Per-zone table: parse the "r,g,b;r,g,b;r,g,b;r,g,b" argument, falling back
+  # to the <r> <g> <b> arguments when absent. Kept for every mode so unrelated
+  # writes (e.g. brightness from inc/dec) don't lose per-zone colors.
+  local -a trips=()
+  local rest t i
+  if [[ -n "$zones" ]]; then
+    IFS=';' read -r -a trips <<< "$zones"
+  fi
+  if [[ ${#trips[@]} -ne 4 ]]; then
+    trips=("$r,$g,$b" "$r,$g,$b" "$r,$g,$b" "$r,$g,$b")
+  fi
 
   if [[ "$mode" == static ]]; then
+    # Merge the edit: "all" applies <r> <g> <b> to every zone, otherwise only
+    # the selected zone changes and the rest keep their persisted colors.
+    if [[ "$zone" == all ]]; then
+      trips=("$r,$g,$b" "$r,$g,$b" "$r,$g,$b" "$r,$g,$b")
+    elif [[ "$zone" =~ ^[1-4]$ ]]; then
+      trips[$((zone - 1))]="$r,$g,$b"
+    fi
     # Static color: one 4-byte write per zone. Zone bitmask = 1 << (zone - 1).
-    for zone in 1 2 4 8; do
-      printf "\\$(oct "$zone")\\$(oct "$r")\\$(oct "$g")\\$(oct "$b")" > "$STATIC_DEV"
+    local cr cg cb
+    for i in 0 1 2 3; do
+      cr=${trips[$i]%%,*}; rest=${trips[$i]#*,}; cg=${rest%%,*}; cb=${rest##*,}
+      printf "\\$(oct "$((1 << i))")\\$(oct "$cr")\\$(oct "$cg")\\$(oct "$cb")" > "$STATIC_DEV"
     done
     # Static mode + brightness: byte[2] = brightness, byte[9] = 1.
     printf "\\$(oct 0)\\$(oct 0)\\$(oct "$brightness")\\$(oct 0)\\$(oct 0)\\$(oct 0)\\$(oct 0)\\$(oct 0)\\$(oct 0)\\$(oct 1)\\$(oct 0)\\$(oct 0)\\$(oct 0)\\$(oct 0)\\$(oct 0)\\$(oct 0)" > "$DYNAMIC_DEV"
@@ -81,8 +111,9 @@ write_set() {
     printf "\\$(oct "$code")\\$(oct "$speed")\\$(oct "$brightness")\\$(oct "$flag")\\$(oct "$direction")\\$(oct "$r")\\$(oct "$g")\\$(oct "$b")\\$(oct 0)\\$(oct 1)\\$(oct 0)\\$(oct 0)\\$(oct 0)\\$(oct 0)\\$(oct 0)\\$(oct 0)" > "$DYNAMIC_DEV"
   fi
 
-  printf '{"mode":"%s","brightness":%d,"r":%d,"g":%d,"b":%d,"speed":%d,"direction":%d,"poweredOn":%s,"lastBrightness":%d}\n' \
-    "$mode" "$brightness" "$r" "$g" "$b" "$speed" "$direction" "$powered" "$last" > "$STATE_FILE"
+  local zones_json="[[${trips[0]}],[${trips[1]}],[${trips[2]}],[${trips[3]}]]"
+  printf '{"mode":"%s","brightness":%d,"r":%d,"g":%d,"b":%d,"speed":%d,"direction":%d,"poweredOn":%s,"lastBrightness":%d,"zone":"%s","zones":%s}\n' \
+    "$mode" "$brightness" "$r" "$g" "$b" "$speed" "$direction" "$powered" "$last" "$zone" "$zones_json" > "$STATE_FILE"
 }
 
 check_devices() {
@@ -104,21 +135,40 @@ load_state() {
   C_DIRECTION=$(sed -n 's/.*"direction":\([0-9]*\).*/\1/p' <<<"$s")
   C_POWERED=$(sed -n 's/.*"poweredOn":\([^,}]*\).*/\1/p' <<<"$s")
   C_LAST=$(sed -n 's/.*"lastBrightness":\([0-9]*\).*/\1/p' <<<"$s")
+  C_ZONE=$(sed -n 's/.*"zone":"\([^"]*\)".*/\1/p' <<<"$s")
   [[ "$C_POWERED" == true ]] && C_POWERED=1
   [[ "$C_POWERED" == false ]] && C_POWERED=0
   C_MODE=${C_MODE:-static}; C_BRIGHTNESS=${C_BRIGHTNESS:-100}
   C_R=${C_R:-255}; C_G=${C_G:-255}; C_B=${C_B:-255}
   C_SPEED=${C_SPEED:-4}; C_DIRECTION=${C_DIRECTION:-1}
   C_POWERED=${C_POWERED:-1}; C_LAST=${C_LAST:-100}
+  C_ZONE=${C_ZONE:-all}
+
+  # Rebuild the zone table ("r,g,b;r,g,b;r,g,b;r,g,b") from the JSON array
+  # "[[r,g,b],[r,g,b],[r,g,b],[r,g,b]]" so inc/dec/toggle can pass it through.
+  local zc zt t i
+  zc=$(sed -n 's/.*"zones":\[\(.*\)\].*/\1/p' <<<"$s")
+  if [[ -n "$zc" ]]; then
+    zc="${zc#[}"
+    zt=()
+    for ((i = 0; i < 4; i++)); do
+      t="${zc%%]*}"
+      zt+=("${t#[}")
+      zc="${zc#*]}"; zc="${zc#,}"
+    done
+    C_ZONES=$(IFS=';'; echo "${zt[*]}")
+  else
+    C_ZONES=""
+  fi
 }
 
 case "${1:-}" in
   set)
-    [[ $# -eq 8 || $# -eq 10 ]] || usage
+    [[ $# -eq 8 || $# -eq 10 || $# -eq 12 ]] || usage
     m=$(mode_name "$2")
     [[ -z "$m" ]] && { echo "invalid mode: $2" >&2; exit 2; }
     check_devices
-    write_set "$m" "$3" "$4" "$5" "$6" "$7" "$8" "${9:-1}" "${10:-}"
+    write_set "$m" "$3" "$4" "$5" "$6" "$7" "$8" "${9:-1}" "${10:-}" "${11:-all}" "${12:-}"
     ;;
   inc)
     [[ $# -eq 2 ]] || usage
@@ -126,7 +176,7 @@ case "${1:-}" in
     load_state
     new=$((C_BRIGHTNESS + $2))
     (( new > 100 )) && new=100
-    write_set "$C_MODE" "$new" "$C_R" "$C_G" "$C_B" "$C_SPEED" "$C_DIRECTION" 1 "$C_LAST"
+    write_set "$C_MODE" "$new" "$C_R" "$C_G" "$C_B" "$C_SPEED" "$C_DIRECTION" 1 "$C_LAST" "$C_ZONE" "$C_ZONES"
     ;;
   dec)
     [[ $# -eq 2 ]] || usage
@@ -134,16 +184,16 @@ case "${1:-}" in
     load_state
     new=$((C_BRIGHTNESS - $2))
     (( new < 0 )) && new=0
-    write_set "$C_MODE" "$new" "$C_R" "$C_G" "$C_B" "$C_SPEED" "$C_DIRECTION" $(( new > 0 )) "$C_LAST"
+    write_set "$C_MODE" "$new" "$C_R" "$C_G" "$C_B" "$C_SPEED" "$C_DIRECTION" $(( new > 0 )) "$C_LAST" "$C_ZONE" "$C_ZONES"
     ;;
   toggle)
     [[ $# -eq 1 ]] || usage
     check_devices
     load_state
     if (( C_POWERED )); then
-      write_set "$C_MODE" 0 "$C_R" "$C_G" "$C_B" "$C_SPEED" "$C_DIRECTION" 0 "$C_BRIGHTNESS"
+      write_set "$C_MODE" 0 "$C_R" "$C_G" "$C_B" "$C_SPEED" "$C_DIRECTION" 0 "$C_BRIGHTNESS" "$C_ZONE" "$C_ZONES"
     else
-      write_set "$C_MODE" "$C_LAST" "$C_R" "$C_G" "$C_B" "$C_SPEED" "$C_DIRECTION" 1 "$C_LAST"
+      write_set "$C_MODE" "$C_LAST" "$C_R" "$C_G" "$C_B" "$C_SPEED" "$C_DIRECTION" 1 "$C_LAST" "$C_ZONE" "$C_ZONES"
     fi
     ;;
   status)

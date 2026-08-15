@@ -38,6 +38,17 @@ Panel {
   property int speed: 4
   property int direction: 1
 
+  // Per-zone color state (static only): the zone button the edit happened on
+  // ("all" | "1" | "2" | "3" | "4") and the four [r,g,b] triplets. In "all" an
+  // edit writes every zone; otherwise only the selected zone changes.
+  property string zone: "all"
+  property var zoneColors: [[255, 255, 255], [255, 255, 255], [255, 255, 255], [255, 255, 255]]
+
+  // Propagate channel edits into the zone table (see syncZoneColor below).
+  onRedChanged: root.syncZoneColor()
+  onGreenChanged: root.syncZoneColor()
+  onBlueChanged: root.syncZoneColor()
+
   property bool applyQueued: false
   property bool restored: false
   property real wheelAccumulator: 0
@@ -75,7 +86,8 @@ Panel {
       root.mode,
       String(root.brightnessPercent), String(root.red), String(root.green), String(root.blue),
       String(root.speed), String(root.direction),
-      root.poweredOn ? "1" : "0", String(root.lastBrightness)]
+      root.poweredOn ? "1" : "0", String(root.lastBrightness),
+      root.zone, root.zonesString()]
     applyProc.running = true
   }
 
@@ -159,6 +171,7 @@ Panel {
   // direction only for wave/shifting, color hidden where the module ignores it.
   function computeSections() {
     var s = ["brightness", "mode"]
+    if (root.mode === "static") s.push("zones")
     if (Model.isDynamic(root.mode)) s.push("speed")
     if (Model.usesDirection(root.mode)) s.push("direction")
     if (Model.usesColor(root.mode)) s.push("color")
@@ -168,8 +181,66 @@ Panel {
   function setMode(name) {
     if (name === root.mode) return
     root.mode = name
+    // Returning to static: show the selected zone's color so the sliders match
+    // what's actually on the keyboard ("all" keeps the current edit color).
+    if (name === "static" && root.zone !== "all") {
+      var idx = Number(root.zone) - 1
+      root.red = root.zoneColors[idx][0]
+      root.green = root.zoneColors[idx][1]
+      root.blue = root.zoneColors[idx][2]
+    }
     root.clampCursor()
     root.apply()
+  }
+
+  // ---- zones ---------------------------------------------------------------
+  // Keep the per-zone table in step with the editable channels: editing in
+  // "all" writes every zone, editing in zone N writes only zone N. Entering a
+  // zone does NOT clobber the others because setZone() only changes the channels
+  // (which sync back to the same zone they were read from).
+  function syncZoneColor() {
+    if (root.zone === "all") {
+      root.zoneColors = [
+        [root.red, root.green, root.blue],
+        [root.red, root.green, root.blue],
+        [root.red, root.green, root.blue],
+        [root.red, root.green, root.blue]
+      ]
+    } else {
+      var idx = Number(root.zone) - 1
+      var c = root.zoneColors
+      var copy = c.slice()
+      copy[idx] = [root.red, root.green, root.blue]
+      root.zoneColors = copy
+    }
+  }
+
+  function zonesString() {
+    var parts = []
+    for (var i = 0; i < root.zoneColors.length; i++) {
+      var t = root.zoneColors[i]
+      parts.push(String(t[0]) + "," + String(t[1]) + "," + String(t[2]))
+    }
+    return parts.join(";")
+  }
+
+  function setZone(name) {
+    if (name === root.zone) return
+    root.zone = name
+    if (name !== "all") {
+      var idx = Number(name) - 1
+      root.red = root.zoneColors[idx][0]
+      root.green = root.zoneColors[idx][1]
+      root.blue = root.zoneColors[idx][2]
+    }
+    root.apply()
+  }
+
+  // h/l moves within the 1x5 zone row; Enter activates the focused zone.
+  function adjustZone(delta) {
+    if (root.focusSection !== "zones") return
+    var t = root.selectedIndex + delta
+    if (t >= 0 && t < Model.ZONES.length) root.selectedIndex = t
   }
 
   // h/l moves within the 2x3 grid.
@@ -197,6 +268,7 @@ Panel {
   function sectionCount(section) {
     if (section === "brightness") return 0  // single slider sentinel at -1
     if (section === "mode") return Model.MODES.length
+    if (section === "zones") return Model.ZONES.length
     if (section === "speed") return 0
     if (section === "direction") return 0
     if (section === "color") return 4       // R, G, B, hex
@@ -271,6 +343,10 @@ Panel {
     if (root.focusSection === "header") { root.togglePower(); return }
     if (root.focusSection === "mode") {
       root.setMode(Model.MODES[root.selectedIndex].name)
+      return
+    }
+    if (root.focusSection === "zones") {
+      root.setZone(Model.ZONES[root.selectedIndex].value)
       return
     }
     if (root.focusSection !== "color") return
@@ -348,6 +424,10 @@ Panel {
       waitForEnd: true
       onStreamFinished: {
         var state = Model.parseState(text)
+        // Load the zone table before the channels so syncZoneColor writes
+        // back into the persisted per-zone colors, not the defaults.
+        root.zone = state.zone
+        root.zoneColors = state.zones
         root.brightnessPercent = state.brightness
         root.red = state.r
         root.green = state.g
@@ -449,6 +529,7 @@ Panel {
           if (root.focusSection === "brightness") root.adjustBrightness(dx * 5)
           else if (root.focusSection === "color") root.adjustChannel(dx * 5)
           else if (root.focusSection === "mode") root.adjustMode(dx)
+          else if (root.focusSection === "zones") root.adjustZone(dx)
           else if (root.focusSection === "speed") root.adjustSpeed(dx)
           else if (root.focusSection === "direction") root.adjustDirection()
         }
@@ -741,6 +822,84 @@ Panel {
                       if (!on) return
                       root.cursorActive = true
                       root.focusSection = "mode"
+                      root.selectedIndex = index
+                    }
+                  }
+                }
+              }
+            }
+          }
+
+          // ---------- Zones (static) ----------
+          Column {
+            id: zoneSection
+            visible: root.mode === "static"
+            width: parent.width
+            spacing: Style.space(6)
+
+            Item {
+              width: parent.width
+              implicitHeight: Math.max(zoneHeader.implicitHeight, zoneValue.implicitHeight)
+
+              PanelSectionHeader {
+                id: zoneHeader
+                text: "ZONES"
+                foreground: root.bar.foreground
+                fontFamily: root.bar.fontFamily
+                anchors.left: parent.left
+                anchors.verticalCenter: parent.verticalCenter
+              }
+
+              Text {
+                id: zoneValue
+                text: root.zone === "all" ? "All" : "Zone " + root.zone
+                color: Qt.darker(root.bar.foreground, 1.4)
+                font.family: root.bar.fontFamily
+                font.pixelSize: Style.font.caption
+                font.bold: true
+                anchors.right: parent.right
+                anchors.rightMargin: Style.space(6)
+                anchors.verticalCenter: parent.verticalCenter
+              }
+            }
+
+            CursorSurface {
+              id: zoneRow
+              width: parent.width
+              height: zoneButtons.implicitHeight + Style.spacing.controlGap
+              hasCursor: root.cursorActive && root.focusSection === "zones"
+              onHasCursorChanged: if (hasCursor) root.ensureCursorVisible(zoneRow)
+              foreground: root.bar.foreground
+              outline: true
+
+              Row {
+                id: zoneButtons
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.leftMargin: Style.space(6)
+                anchors.rightMargin: Style.space(6)
+                spacing: Style.space(8)
+
+                Repeater {
+                  model: Model.ZONES
+                  delegate: Button {
+                    id: zoneButton
+                    required property var modelData
+                    required property int index
+
+                    width: Math.floor((zoneButtons.width - zoneButtons.spacing * (Model.ZONES.length - 1)) / Model.ZONES.length)
+                    text: zoneButton.modelData.label
+                    selected: zoneButton.modelData.value === root.zone
+                    hasCursor: root.cursorActive && root.focusSection === "zones" && root.selectedIndex === index
+                    enabled: root.available
+                    foreground: root.bar.foreground
+                    fontFamily: root.bar.fontFamily
+                    onClicked: root.setZone(zoneButton.modelData.value)
+                    onHovered: function(on) {
+                      if (!on) return
+                      root.cursorActive = true
+                      root.focusSection = "zones"
                       root.selectedIndex = index
                     }
                   }

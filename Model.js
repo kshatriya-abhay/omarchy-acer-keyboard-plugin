@@ -99,6 +99,40 @@ function usesDirection(mode) {
   return mode === "wave" || mode === "shift"
 }
 
+// ---- zones (static only) ---------------------------------------------------
+// The AN515-57 backlight has 4 zones (bitmasks 1,2,4,8). Per-zone color only
+// applies to static mode; dynamic modes carry a single RGB triplet. The ordered
+// list drives the 1x5 zone button row (All + four zone numbers) in Panel.qml.
+
+var ZONES = [
+  { value: "all", label: "All" },
+  { value: "1", label: "1" },
+  { value: "2", label: "2" },
+  { value: "3", label: "3" },
+  { value: "4", label: "4" }
+]
+
+function clampZone(value) {
+  for (var i = 0; i < ZONES.length; i++) {
+    if (ZONES[i].value === value) return value
+  }
+  return "all"
+}
+
+function zoneTriplets(raw, r, g, b) {
+  var out = []
+  var i
+  for (i = 0; i < 4; i++) {
+    var t = raw && raw[i] ? raw[i] : null
+    out.push([
+      clampByte(t && t[0] !== undefined ? t[0] : r),
+      clampByte(t && t[1] !== undefined ? t[1] : g),
+      clampByte(t && t[2] !== undefined ? t[2] : b)
+    ])
+  }
+  return out
+}
+
 function parseState(raw) {
   var state = {
     mode: "static",
@@ -109,7 +143,9 @@ function parseState(raw) {
     speed: 4,
     direction: 1,
     poweredOn: true,
-    lastBrightness: 100
+    lastBrightness: 100,
+    zone: "all",
+    zones: [[255, 255, 255], [255, 255, 255], [255, 255, 255], [255, 255, 255]]
   }
   try {
     var parsed = raw ? JSON.parse(String(raw)) : {}
@@ -127,6 +163,8 @@ function parseState(raw) {
     state.direction = clampDirection(parsed.direction)
     state.poweredOn = parsed.poweredOn !== false
     state.lastBrightness = clampBrightness(parsed.lastBrightness)
+    state.zone = clampZone(parsed.zone)
+    state.zones = zoneTriplets(parsed.zones, state.r, state.g, state.b)
   } catch (e) {}
   return state
 }
@@ -143,12 +181,15 @@ if (typeof module !== "undefined") {
     isValidHex: isValidHex,
     MODE_CODES: MODE_CODES,
     MODES: MODES,
+    ZONES: ZONES,
     modeName: modeName,
     modeCode: modeCode,
     modeLabel: modeLabel,
     isDynamic: isDynamic,
     usesColor: usesColor,
     usesDirection: usesDirection,
+    clampZone: clampZone,
+    zoneTriplets: zoneTriplets,
     parseState: parseState
   }
 }

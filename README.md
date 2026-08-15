@@ -19,6 +19,8 @@ omarchy bar.
   an OSD popup
 - **Static RGB color** input via three R/G/B sliders each with a numeric input
   *and* a `#RRGGBB` hex field (all kept in sync)
+- **Per-zone color** (Static mode) — assign a different color to each of the 4
+  backlight zones, or use the "All" button to drive every zone from one color
 - **Five animation modes** (breathing, neon, wave, shifting, zoom) in a 2×3
   grid, each with per-mode options: animation speed (0–9), wave/shifting
   direction, and color where the module honors it
@@ -126,12 +128,17 @@ o.bind("XF86Presentation", "Keyboard RGB toggle", kbd_rgb .. " toggle", { locked
 
 The subcommands read the persisted state and write the devices:
 
-- `kbd-rgb set <mode> <brightness> <r> <g> <b> <speed> <direction> [<powered> <lastBrightness>]`
+- `kbd-rgb set <mode> <brightness> <r> <g> <b> <speed> <direction> [<powered> <lastBrightness>] [<zone> <zones>]`
   — apply a full state. `<mode>` is a name (`static`, `breath`, `neon`, `wave`,
   `shift`, `zoom`) or its code (0–5). Speed is 0–9 (0 pauses the animation);
   direction is 1 (left → right) or 2 (right → left) — note the firmware
   interprets these opposite to facer_rgb.py's CLI help. The optional power pair is
-  used to persist the on/off switch state.
+  used to persist the on/off switch state. The optional zone pair is used by the
+  panel for per-zone color (Static mode): `<zone>` is `all` or a zone number
+  1–4, and `<zones>` is a semicolon-separated list of four `r,g,b` triplets
+  (one per zone). `all` applies `<r> <g> <b>` to every zone; a numbered zone
+  updates only that zone and the others keep their persisted colors. Without
+  them the helper behaves as before (one color on all zones).
 - `kbd-rgb inc <percent>` — raise brightness (clamped at 100), powers on
 - `kbd-rgb dec <percent>` — lower brightness (powers off at 0)
 - `kbd-rgb toggle` — flip backlight on/off, restoring the last brightness on
@@ -167,7 +174,7 @@ The subcommands read the persisted state and write the devices:
 - [x] On/off power switch (restores previous brightness)
 - [x] Detect missing device nodes / module and show an "unavailable" warning
 - [x] Dynamic modes (breath / neon / wave / shift / zoom)
-- [ ] Per-zone color assignment
+- [x] Per-zone color assignment (Static mode: All + zones 1–4)
 - [ ] Profiles (save / load / list)
 - [ ] Turbo-mode indicator
 
