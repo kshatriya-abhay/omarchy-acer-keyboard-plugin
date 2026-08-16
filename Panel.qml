@@ -717,7 +717,7 @@ Panel {
               foreground: root.bar.foreground
               outline: true
 
-              PanelSliderFixed {
+              PanelSlider {
                 id: brightnessSlider
                 bar: root.bar
                 enabled: root.available
@@ -950,7 +950,7 @@ Panel {
               foreground: root.bar.foreground
               outline: true
 
-              PanelSliderFixed {
+              PanelSlider {
                 id: speedSlider
                 bar: root.bar
                 enabled: root.available
@@ -1135,7 +1135,7 @@ Panel {
                   anchors.verticalCenter: parent.verticalCenter
                 }
 
-                PanelSliderFixed {
+                PanelSlider {
                   id: redSlider
                   bar: root.bar
                   enabled: root.available
@@ -1203,7 +1203,7 @@ Panel {
                   anchors.verticalCenter: parent.verticalCenter
                 }
 
-                PanelSliderFixed {
+                PanelSlider {
                   id: greenSlider
                   bar: root.bar
                   enabled: root.available
@@ -1271,7 +1271,7 @@ Panel {
                   anchors.verticalCenter: parent.verticalCenter
                 }
 
-                PanelSliderFixed {
+                PanelSlider {
                   id: blueSlider
                   bar: root.bar
                   enabled: root.available
