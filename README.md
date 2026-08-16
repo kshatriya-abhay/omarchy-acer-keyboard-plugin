@@ -49,6 +49,10 @@ sudo ./install.sh
 sudo ./install_service.sh
 ```
 
+> **Disclaimer:** this is a third-party kernel module maintained outside of this
+> project. It runs in kernel space with full system privileges, so please review
+> its source and installation scripts yourself, and install it at your own risk.
+
 After a reboot the module exposes the devices listed under **Requirements**.
 
 ## Requirements
@@ -64,28 +68,21 @@ After a reboot the module exposes the devices listed under **Requirements**.
 
 ## Installation
 
-Clone this repository and copy it into omarchy's plugin directory (the repo
-root is the plugin: `manifest.json` with its `Panel.qml` entry point live at
-the top level, per the omarchy plugin layout):
+The repo root is the plugin (`manifest.json` with its `Panel.qml` entry point
+live at the top level, per the omarchy plugin layout), so it can be added like
+any other omarchy plugin.
 
-```bash
-git clone https://github.com/kshatriya-abhay/acer-keyboard-plugin.git
-mkdir -p ~/.config/omarchy/plugins/kshatriya-abhay.acer-keyboard
-cp -r acer-keyboard-plugin/. ~/.config/omarchy/plugins/kshatriya-abhay.acer-keyboard/
+**From the UI:** Omarchy Menu > Setup > Plugins > Add Plugin, then enter the
+repo URL:
+
+```
+https://github.com/kshatriya-abhay/omarchy-acer-keyboard-plugin
 ```
 
-Validate, rescan, and enable it:
+**From the CLI:**
 
 ```bash
-omarchy plugin validate ~/.config/omarchy/plugins/kshatriya-abhay.acer-keyboard
-omarchy-shell shell rescanPlugins
-omarchy plugin enable kshatriya-abhay.acer-keyboard --section right
-```
-
-Optionally place it in the bar (e.g. next to the Bluetooth widget):
-
-```bash
-omarchy bar put kshatriya-abhay.acer-keyboard --before omarchy.bluetooth
+omarchy plugin add https://github.com/kshatriya-abhay/omarchy-acer-keyboard-plugin
 ```
 
 ## Usage
@@ -175,25 +172,16 @@ The subcommands read the persisted state and write the devices:
 - [x] Detect missing device nodes / module and show an "unavailable" warning
 - [x] Dynamic modes (breath / neon / wave / shift / zoom)
 - [x] Per-zone color assignment (Static mode: All + zones 1–4)
-- [ ] Profiles (save / load / list)
-- [ ] Turbo-mode indicator
 
 ## Known issues
 
-- **Slider changes don't instantly refresh the text fields** — dragging an
-  R/G/B slider doesn't immediately update that channel's numeric input, and
-  the numeric/hex fields don't reflect slider changes until the panel is
-  refreshed. The color itself commits correctly on release; only the on-screen
-  values lag. This is the same Quickshell-side field-refresh quirk as the hex
-  field issue below.
-- **Hex field refresh on Enter** — after typing a value in an R/G/B field and
-  pressing Enter, the hex display only updates after the panel is reopened. The
-  value itself commits correctly; only the hex field's text is stale until the
-  panel is refreshed. Under investigation (see `PLAN.md`).
-- **ACPI registers can wedge** — like the upstream module itself, the ACPI
-  registers behind the keyboard can occasionally get stuck (color writes start
-  blocking). If writes stop applying, wait a bit or reboot; the module's README
-  recommends resetting ACPI registers with a reboot or the Predator Sense app.
+- **The backlight can stop responding** — the ACPI registers behind the
+  keyboard can wedge when brightness/color writes are issued while the EC is
+  busy (commonly from setting keyboard brightness in the Acer BIOS/firmware
+  tooling or other brightness utilities). Writes start blocking and colors stop
+  applying. This is a hardware/firmware limitation of the upstream module
+  itself; reset the EC with a hard power off (shut down, unplug, hold the power
+  button ~30s), or reboot.
 
 ## License
 
