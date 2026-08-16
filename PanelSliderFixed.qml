@@ -2,13 +2,15 @@ import QtQuick
 import qs.Ui
 import qs.Commons
 
-// Fork of omarchy's PanelSlider (qs.Ui) with a corrected drag->value mapping.
+// Fork of omarchy's PanelSlider (qs.Ui) with a symmetric drag->value mapping.
 // The upstream valueFromX maps the pointer to the full track, but the knob
 // center is clamped ~half-knob from each edge — so grabbing the knob at an
-// extreme jumps the value inward (0->6, 255->249 at 200px) and the practical
-// drag range compresses to roughly minimum+1..maximum-1. Here the pointer is
-// mapped over the knob's usable travel (center-to-center), so the extremes
-// are reachable and grabbing the knob never moves the value.
+// extreme jumps the value inward (0->9, 255->246 at 200px/14px knob) while the
+// knob position stays pinned short of the edge. Here the pointer is mapped over
+// the knob's usable travel (track.width - knobSize, offset by half a knob) and
+// the knob x binding mirrors that same travel, so the two are consistent at
+// every position: grabbing the knob never moves the value, the extremes are
+// reachable, and the knob sits flush at both edges.
 Item {
   id: root
 
@@ -96,7 +98,10 @@ Item {
     color: root.knobColor
     borderSpec: Border.flat(root.bar ? root.bar.background : "#101315", Math.max(1, Style.space(2)))
     anchors.verticalCenter: track.verticalCenter
-    x: Math.max(0, Math.min(track.width - width, track.width * root.progress - width / 2))
+    // Mirror the valueFromX travel exactly: knob center sits at
+    // knobSize/2 + progress * (track.width - knobSize), so it is flush at both
+    // extremes and grabbing the knob never moves the value (see header comment).
+    x: root.progress * Math.max(0, track.width - width)
     scale: root._hot ? 1.15 : 1.0
 
     Behavior on x {
