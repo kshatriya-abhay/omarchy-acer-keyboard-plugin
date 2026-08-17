@@ -13,8 +13,9 @@ omarchy bar.
 
 ## Features
 
-- **Power switch** — turn the keyboard backlight off (writes brightness 0) or
-  back on, restoring the previous brightness level; state survives restarts
+- **Power switch** — toggles the backlight off (writes brightness 0) or back
+  on, restoring the previous brightness level. On/off is derived from
+  brightness (0 = off), so dragging the brightness to 0 also flips the switch
 - **Brightness** control (0–100) with live preview, mouse-wheel stepping, and
   an OSD popup
 - **Static RGB color** input via three R/G/B sliders each with a numeric input
@@ -25,7 +26,8 @@ omarchy bar.
   grid, each with per-mode options: animation speed (0–9), wave/shifting
   direction, and color where the module honors it
 - Live color swatch and the current color shown directly on the bar button
-- Restores the last applied brightness/color/mode/power state when the shell starts
+- **No writes on start** — the plugin only touches the keyboard in response to
+  your input; nothing is applied when the shell starts
 - **Module detection** — if the `facer` kernel module or its device nodes are
   missing, the panel shows a warning banner and disables all controls instead
   of failing silently
@@ -100,8 +102,9 @@ Click the keyboard icon in the bar to open the panel:
   Zoom). Selecting a mode applies it immediately; the **Speed** (0–9) and
   **Direction** sections appear only for modes that use them. Color options
   are hidden for Neon and Wave, since the module ignores color for those.
-- The last applied state (mode, brightness, color, and power) is restored
-  automatically on the next shell start.
+- The last applied state (mode, brightness, color, and zones) is remembered in
+  `state.json`, but the plugin never writes to the keyboard on start — only
+  your changes do.
 
 > If the `facer` module or its devices are missing, the panel shows a warning
 > banner (with the specific cause) and the controls are disabled. Run
@@ -129,8 +132,9 @@ The subcommands read the persisted state and write the devices:
   — apply a full state. `<mode>` is a name (`static`, `breath`, `neon`, `wave`,
   `shift`, `zoom`) or its code (0–5). Speed is 0–9 (0 pauses the animation);
   direction is 1 (left → right) or 2 (right → left) — note the firmware
-  interprets these opposite to facer_rgb.py's CLI help. The optional power pair is
-  used to persist the on/off switch state. The optional zone pair is used by the
+  interprets these opposite to facer_rgb.py's CLI help. The optional power pair
+  is accepted for compatibility, but on/off is derived from `<brightness>`
+  (0 = off) rather than stored as its own flag. The optional zone pair is used by the
   panel for per-zone color (Static mode): `<zone>` is `all` or a zone number
   1–4, and `<zones>` is a semicolon-separated list of four `r,g,b` triplets
   (one per zone). `all` applies `<r> <g> <b>` to every zone; a numbered zone

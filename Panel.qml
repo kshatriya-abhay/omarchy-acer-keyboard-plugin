@@ -21,10 +21,11 @@ Panel {
   property int blue: 255
   property string hexValue: Model.rgbToHex(root.red, root.green, root.blue)
 
-  // Power toggle state. Turning the switch off writes brightness 0 but keeps
-  // the last non-zero brightness so flipping it back on restores it. Both are
-  // persisted through kbd-rgb so the state survives shell/plugin restarts.
-  property bool poweredOn: true
+  // On/off is derived from brightness, not stored separately: brightness 0
+  // means off, anything above means on. The switch just writes brightness.
+  // lastBrightness remembers the last non-zero level so turning it back on
+  // restores it. Persisted through kbd-rgb so the state survives restarts.
+  readonly property bool poweredOn: root.brightnessPercent > 0
   property int lastBrightness: 100
 
   // Whether the facer module + device nodes are present (checked via
@@ -50,7 +51,6 @@ Panel {
   onBlueChanged: root.syncZoneColor()
 
   property bool applyQueued: false
-  property bool restored: false
   property real wheelAccumulator: 0
 
   property string focusSection: "brightness"
@@ -62,11 +62,6 @@ Panel {
 
   function helperPath() {
     return String(Qt.resolvedUrl("kbd-rgb")).replace("file://", "")
-  }
-
-  function setting(name, fallback) {
-    var value = settings ? settings[name] : undefined
-    return value === undefined || value === null ? fallback : value
   }
 
   function refresh() {
@@ -96,12 +91,11 @@ Panel {
   }
 
   // Any direct brightness change while the keyboard is switched off turns it
-  // back on — the user clearly wants light.
+  // back on — the user clearly wants light. On/off follows automatically since
+  // it's derived from brightness.
   function userSetBrightness(value) {
     if (!root.available) return
-    var v = Model.clampBrightness(value)
-    if (v > 0 && !root.poweredOn) root.poweredOn = true
-    root.brightnessPercent = v
+    root.brightnessPercent = Model.clampBrightness(value)
   }
 
   function previewBrightness(value) {
@@ -112,14 +106,12 @@ Panel {
   // Power switch: off writes brightness 0, on restores the previous level.
   function togglePower() {
     if (!root.available) return
-    if (root.poweredOn) {
-      if (root.brightnessPercent > 0) root.lastBrightness = root.brightnessPercent
+    if (root.brightnessPercent > 0) {
+      root.lastBrightness = root.brightnessPercent
       root.brightnessPercent = 0
-      root.poweredOn = false
     } else {
       if (root.lastBrightness <= 0) root.lastBrightness = 100
       root.brightnessPercent = root.lastBrightness
-      root.poweredOn = true
     }
     root.apply()
   }
@@ -432,7 +424,6 @@ Panel {
         root.red = state.r
         root.green = state.g
         root.blue = state.b
-        root.poweredOn = state.poweredOn
         root.lastBrightness = state.lastBrightness
         root.mode = state.mode
         root.speed = state.speed
@@ -458,12 +449,6 @@ Panel {
         } else {
           root.available = true
           root.availabilityIssue = ""
-        }
-        // Restore the last applied color/brightness on plugin load, but only
-        // once availability is known (and only when devices exist).
-        if (root.setting("applyOnStart", true) && !root.restored) {
-          root.restored = true
-          if (root.available) root.apply()
         }
       }
     }

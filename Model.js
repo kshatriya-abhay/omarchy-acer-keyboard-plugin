@@ -142,7 +142,6 @@ function parseState(raw) {
     b: 255,
     speed: 4,
     direction: 1,
-    poweredOn: true,
     lastBrightness: 100,
     zone: "all",
     zones: [[255, 255, 255], [255, 255, 255], [255, 255, 255], [255, 255, 255]]
@@ -161,7 +160,6 @@ function parseState(raw) {
     state.b = clampByte(parsed.b)
     state.speed = clampSpeed(parsed.speed)
     state.direction = clampDirection(parsed.direction)
-    state.poweredOn = parsed.poweredOn !== false
     state.lastBrightness = clampBrightness(parsed.lastBrightness)
     state.zone = clampZone(parsed.zone)
     state.zones = zoneTriplets(parsed.zones, state.r, state.g, state.b)

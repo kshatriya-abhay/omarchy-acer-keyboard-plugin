@@ -21,10 +21,13 @@
 #   kbd-rgb set <mode> <brightness> <r> <g> <b> <speed> <direction> [<powered> <lastBrightness>] [<zone> <zones>]
 #   kbd-rgb inc <percent>    # raise brightness (powers on)
 #   kbd-rgb dec <percent>    # lower brightness (powers off at 0)
-#   kbd-rgb toggle           # backlit RGB on/off (off keeps lastBrightness)
+#   kbd-rgb toggle           # backlit on/off (off writes 0, keeps lastBrightness)
 #   kbd-rgb status           # ok | module-missing | devices-missing
 #   kbd-rgb get
 #
+# On/off is not stored as its own flag: brightness 0 means off. The optional
+# <powered> argument is accepted for compatibility but the persisted
+# "poweredOn" is always derived from <brightness>.
 # <zone> is all|1|2|3|4 (the zone button the edit happened on). <zones> is a
 # semicolon-separated list of four "r,g,b" triplets, one per zone. Only static
 # mode is per-zone: the active zone's triplet is set from <r> <g> <b> (all = all
@@ -111,9 +114,13 @@ write_set() {
     printf "\\$(oct "$code")\\$(oct "$speed")\\$(oct "$brightness")\\$(oct "$flag")\\$(oct "$direction")\\$(oct "$r")\\$(oct "$g")\\$(oct "$b")\\$(oct 0)\\$(oct 1)\\$(oct 0)\\$(oct 0)\\$(oct 0)\\$(oct 0)\\$(oct 0)\\$(oct 0)" > "$DYNAMIC_DEV"
   fi
 
+  # On/off is derived from brightness (0 = off), so persist that rather than a
+  # separately-maintained flag.
+  local po=false
+  (( brightness > 0 )) && po=true
   local zones_json="[[${trips[0]}],[${trips[1]}],[${trips[2]}],[${trips[3]}]]"
   printf '{"mode":"%s","brightness":%d,"r":%d,"g":%d,"b":%d,"speed":%d,"direction":%d,"poweredOn":%s,"lastBrightness":%d,"zone":"%s","zones":%s}\n' \
-    "$mode" "$brightness" "$r" "$g" "$b" "$speed" "$direction" "$powered" "$last" "$zone" "$zones_json" > "$STATE_FILE"
+    "$mode" "$brightness" "$r" "$g" "$b" "$speed" "$direction" "$po" "$last" "$zone" "$zones_json" > "$STATE_FILE"
 }
 
 check_devices() {
@@ -133,15 +140,12 @@ load_state() {
   C_B=$(sed -n 's/.*"b":\([0-9]*\).*/\1/p' <<<"$s")
   C_SPEED=$(sed -n 's/.*"speed":\([0-9]*\).*/\1/p' <<<"$s")
   C_DIRECTION=$(sed -n 's/.*"direction":\([0-9]*\).*/\1/p' <<<"$s")
-  C_POWERED=$(sed -n 's/.*"poweredOn":\([^,}]*\).*/\1/p' <<<"$s")
   C_LAST=$(sed -n 's/.*"lastBrightness":\([0-9]*\).*/\1/p' <<<"$s")
   C_ZONE=$(sed -n 's/.*"zone":"\([^"]*\)".*/\1/p' <<<"$s")
-  [[ "$C_POWERED" == true ]] && C_POWERED=1
-  [[ "$C_POWERED" == false ]] && C_POWERED=0
   C_MODE=${C_MODE:-static}; C_BRIGHTNESS=${C_BRIGHTNESS:-100}
   C_R=${C_R:-255}; C_G=${C_G:-255}; C_B=${C_B:-255}
   C_SPEED=${C_SPEED:-4}; C_DIRECTION=${C_DIRECTION:-1}
-  C_POWERED=${C_POWERED:-1}; C_LAST=${C_LAST:-100}
+  C_LAST=${C_LAST:-100}
   C_ZONE=${C_ZONE:-all}
 
   # Rebuild the zone table ("r,g,b;r,g,b;r,g,b;r,g,b") from the JSON array
@@ -190,7 +194,7 @@ case "${1:-}" in
     [[ $# -eq 1 ]] || usage
     check_devices
     load_state
-    if (( C_POWERED )); then
+    if (( C_BRIGHTNESS > 0 )); then
       write_set "$C_MODE" 0 "$C_R" "$C_G" "$C_B" "$C_SPEED" "$C_DIRECTION" 0 "$C_BRIGHTNESS" "$C_ZONE" "$C_ZONES"
     else
       write_set "$C_MODE" "$C_LAST" "$C_R" "$C_G" "$C_B" "$C_SPEED" "$C_DIRECTION" 1 "$C_LAST" "$C_ZONE" "$C_ZONES"
