@@ -46,6 +46,8 @@ Install that module first:
 ```bash
 git clone https://github.com/JafarAkhondali/acer-predator-turbo-and-rgb-keyboard-linux-module.git
 cd acer-predator-turbo-and-rgb-keyboard-linux-module
+# Pin to a reviewed snapshot before building (detached HEAD):
+git checkout 49d1d7d1e45755d3cf57e6b438620ec5bfdf0e4d
 make
 sudo ./install.sh
 sudo ./install_service.sh
