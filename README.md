@@ -89,6 +89,41 @@ https://github.com/kshatriya-abhay/omarchy-acer-keyboard-plugin
 omarchy plugin add https://github.com/kshatriya-abhay/omarchy-acer-keyboard-plugin
 ```
 
+## Removal
+
+Remove the plugin (this disables it and deletes its files), then delete its
+persisted state, and (optionally) the keyboard-module service:
+
+```bash
+omarchy plugin remove kshatriya-abhay.acer-keyboard --yes
+
+# Persisted state (brightness, color, mode, zones):
+rm -rf ~/.config/omarchy/kshatriya-abhay.acer-keyboard
+
+# If you set up the optional keyboard shortcuts (see "Keyboard shortcuts"):
+# edit ~/.config/hypr/bindings.lua, remove the kbd-rgb lines you added there,
+# then reload:
+hyprctl reload
+```
+
+The plugin itself is fully gone after the first command — the persisted state
+and the kernel module are the only leftovers, so they're listed separately
+above. The keyboard shortcuts are optional and were only ever a helpful tip,
+so there is nothing to undo unless you chose to set them up.
+
+To also remove the required kernel-module service (from the module's own
+README, run from the cloned `acer-predator-turbo-and-rgb-keyboard-linux-module`
+directory):
+
+```bash
+sudo ./uninstall_service.sh
+sudo ./uninstall.sh
+rmmod facer
+```
+
+This removes the `/dev/acer-gkbbl-*` devices and stops the backlight; the
+keyboard itself is unaffected.
+
 ## Usage
 
 Click the keyboard icon in the bar to open the panel:
@@ -113,10 +148,12 @@ Click the keyboard icon in the bar to open the panel:
 > `kbd-rgb status` for a quick check — it prints `ok`, `module-missing`, or
 > `devices-missing`.
 
-## Keyboard shortcuts
+## Keyboard shortcuts (optional)
 
-The `kbd-rgb` helper also exposes brightness and power subcommands that can be
-bound to the keyboard's media keys (add to `~/.config/hypr/bindings.lua`):
+The `kbd-rgb` helper also exposes brightness and power subcommands. Binding them
+to your keyboard's media keys is **optional** — the panel gives you the same
+controls — and is only added here as a helpful tip. If you want them, add to
+`~/.config/hypr/bindings.lua`:
 
 ```lua
 local kbd_rgb = os.getenv("HOME") .. "/.config/omarchy/plugins/kshatriya-abhay.acer-keyboard/kbd-rgb"
