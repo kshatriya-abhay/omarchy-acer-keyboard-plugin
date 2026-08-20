@@ -9,7 +9,7 @@ This is a drop-in replacement for the RGB/brightness control in
 `acer-predator-turbo-and-rgb-keyboard-linux-module`, integrated into the
 omarchy bar.
 
-![Screenshot](screenshot.png)
+![Screenshot](preview.png)
 
 ## Features
 
